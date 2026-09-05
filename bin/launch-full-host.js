@@ -516,9 +516,9 @@ function spawnVideo() {
 function spawnAudio() {
     const audioArgs = [
         '-hide_banner', '-loglevel', 'error',
-        '-f', 'pulse', '-i', `${sinkName}.monitor`,
+        '-f', 'pulse', '-fragment_size', '5120', '-i', `${sinkName}.monitor`,
         '-ac', '2', '-ar', '48000', '-c:a', 'libopus', '-b:a', '128k', '-frame_duration', '20',
-        '-fflags', '+flush_packets',
+        '-page_duration', '20000',
         '-f', 'ogg', 'pipe:1',
     ];
     audioProc = track(spawn('ffmpeg', audioArgs, { env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
