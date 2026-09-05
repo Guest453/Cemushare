@@ -1225,9 +1225,9 @@ async function configureAudio(config) {
                 const now = audioCtx.currentTime;
                 if (playHead < now + 0.01) playHead = now + JITTER_S;
                 if (playHead - now > MAX_AUDIO_LEAD_S) {
+                    // Burst arrived (e.g. a full Ogg page at once). Still play it so
+                    // audio is gapless; re-anchor keeps the queue from growing forever.
                     playHead = now + JITTER_S;
-                    audioData.close();
-                    return;
                 }
                 src.start(playHead);
                 playHead += buf.duration;

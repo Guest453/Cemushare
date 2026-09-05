@@ -413,7 +413,6 @@ function parseOgg(chunk) {
 let skipPackets = 2;   // OpusHead + OpusTags
 function onOggPacket(p, granule) {
     if (!p.data.length) return;
-    logV(`ogg: packet ${p.data.length} bytes granule=${granule} (page=${parseOgg.page})`);
     if (skipPackets > 0) { skipPackets--; return; }
     // Opus packets are self-contained audio frames — feed them raw.
     const time = ts();
@@ -519,6 +518,7 @@ function spawnAudio() {
         '-hide_banner', '-loglevel', 'error',
         '-f', 'pulse', '-i', `${sinkName}.monitor`,
         '-ac', '2', '-ar', '48000', '-c:a', 'libopus', '-b:a', '128k', '-frame_duration', '20',
+        '-fflags', '+flush_packets',
         '-f', 'ogg', 'pipe:1',
     ];
     audioProc = track(spawn('ffmpeg', audioArgs, { env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
