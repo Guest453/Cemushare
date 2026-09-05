@@ -1256,22 +1256,48 @@ function unlockAudio() {
 }
 
 // ── Input forwarding ────────────────────────────────────────────────────────
+// Track which buttons are currently pressed on this viewer. A held button must
+// not repeat clicks: one physical press → exactly one click message. The button
+// is cleared on mouseup/leave so the next press can click again.
+const _heldButtons = new Set();
+
 function setupStreamInput() {
     const canvas = getStreamCanvas();
     if (!canvas) return;
 
+    const pos = (e, target) => {
+        const rect = target.getBoundingClientRect();
+        return {
+            x: Math.round(((e.clientX - rect.left) / rect.width) * target.width),
+            y: Math.round(((e.clientY - rect.top) / rect.height) * target.height),
+        };
+    };
+
     canvas.addEventListener('mousemove', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = Math.round(((e.clientX - rect.left) / rect.width) * canvas.width);
-        const y = Math.round(((e.clientY - rect.top) / rect.height) * canvas.height);
-        sendStreamInput({ mouse: { x, y } });
+        const p = pos(e, canvas);
+        sendStreamInput({ mouse: { x: p.x, y: p.y } });
     });
     canvas.addEventListener('mousedown', (e) => {
         unlockAudio();
-        const rect = canvas.getBoundingClientRect();
-        const x = Math.round(((e.clientX - rect.left) / rect.width) * canvas.width);
-        const y = Math.round(((e.clientY - rect.top) / rect.height) * canvas.height);
-        sendStreamInput({ mouse: { x, y, click: true, button: e.button + 1 } });
+        const btn = e.button + 1;
+        if (_heldButtons.has(btn)) return;   // already holding → no re-click
+        _heldButtons.add(btn);
+        const p = pos(e, canvas);
+        sendStreamInput({ mouse: { x: p.x, y: p.y, click: true, button: btn } });
+    });
+    canvas.addEventListener('mouseup', (e) => {
+        const btn = e.button + 1;
+        _heldButtons.delete(btn);
+        const p = pos(e, canvas);
+        sendStreamInput({ mouse: { x: p.x, y: p.y } });   // release: stop any hold
+    });
+    // If the pointer leaves while held (or focus is lost), treat as released so
+    // the button never stays stuck down for other viewers.
+    canvas.addEventListener('mouseleave', () => {
+        if (_heldButtons.size) {
+            _heldButtons.clear();
+            sendStreamInput({ mouse: null }); // just keys; host's auto-mouseup fires
+        }
     });
 }
 

@@ -727,7 +727,13 @@ function handleViewerMsg(cons, v, msg) {
         case 'input': {
             const next = new Set();
             if (Array.isArray(msg.keys)) for (const k of msg.keys.slice(0, 16)) if (typeof k === 'string') next.add(k.slice(0, 32));
-            if (msg.mouse) v.mouse = { x: +msg.mouse.x || 0, y: +msg.mouse.y || 0, click: !!msg.mouse.click, button: +msg.mouse.button || 0 };
+            if (msg.mouse) {
+                v.mouse = { x: +msg.mouse.x || 0, y: +msg.mouse.y || 0, click: !!msg.mouse.click, button: +msg.mouse.button || 0 };
+                // Each physical click gets a fresh nonce so two identical clicks
+                // at the same position are distinguishable by the host (without
+                // this, click 2 looks identical to click 1 in the merge state).
+                if (v.mouse.click) { v.clickNonce = (v.clickNonce || 0) + 1; v.mouse.nonce = v.clickNonce; }
+            }
             v.keys = next;
             v.keysAt = Date.now();
             if (next.size) logV(`input: ${v.username} keys=[${[...next].join(',')}] console=${cons.key}`);
@@ -934,7 +940,11 @@ function flushConsoleInput(cons, now) {
     }
     const merged = cons.mode === 'democracy' ? mergeDemocracy(cons, active) : mergeAnarchy(cons, active);
     const serialized = [...merged.keys].sort().join(',') + '|' +
-        (merged.mouse.length ? merged.mouse.map((m) => `${m.x},${m.y},${m.button}`).join(';') : '');
+        (merged.mouse.length ? merged.mouse.map((m) => `${m.x},${m.y},${m.button}:${m.nonce || 0}`).join(';') : '');
+    // Consume clicks as soon as they're sent: a stored click:true would otherwise
+    // be re-merged on every later input message (keys/keepalive) and re-trigger
+    // mousedown+mouseup on the host, so one physical click becomes many.
+    for (const v of active) if (v.mouse && v.mouse.click) v.mouse = null;
     if (serialized !== cons.lastSentKeys || merged.mouse.some((m) => m.click)) {
         cons.lastSentKeys = serialized;
         logV(`input: sending merged ${merged.keys.size} key(s) to host "${cons.key}"`);
