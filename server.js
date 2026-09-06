@@ -63,17 +63,6 @@ const JWT_SECRET   = process.env.EMULATOR_JWT_SECRET || 'dev-secret-change-me';
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 const DISCORD_REDIRECT_URI  = (process.env.DISCORD_REDIRECT_URI || 'https://emushare.alkonsafe.dpdns.org/').trim();
-// Some networks resolve/reroute `discord.com` to the marketing edge instead of the API, which
-// serves the landing page even for /api/oauth2/token. Pin a known API edge IP if that happens.
-const DISCORD_API_IP        = (process.env.DISCORD_API_IP || '').trim();
-
-// Force a specific resolved IP for a host (bypasses bad DNS) while keeping Host/SNI as-is.
-function pinnedLookup(ip) {
-    return (hostname, opts, cb) => {
-        if (opts && opts.all) cb(null, [{ address: ip, family: 4 }]);
-        else cb(null, ip, 4);
-    };
-}
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 const LOG_INFO = process.env.EMULATOR_LOG || 'info'; // 'verbose' | 'info' | 'warn' | 'error'
@@ -422,11 +411,9 @@ function shortLog(text, max = 300) {
     return String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-function httpsJSON(method, hostname, pathname, headers, body, ip) {
+function httpsJSON(method, hostname, pathname, headers, body) {
     return new Promise((resolve, reject) => {
-        const opts = { method, hostname, pathname, headers, servername: hostname };
-        if (ip) opts.lookup = pinnedLookup(ip);
-        const req = https.request(opts, (res) => {
+        const req = https.request({ method, hostname, pathname, headers }, (res) => {
             let raw = '';
             res.on('data', (c) => { raw += c; });
             res.on('end', () => {
@@ -472,6 +459,18 @@ async function handleDiscordAuth(req, res) {
     const redirectUri = DISCORD_REDIRECT_URI;
 
     let exchange;
+    console.log('TOKEN EXCHANGE REQUEST', {
+        url: 'https://discord.com/api/oauth2/token',
+        body: new URLSearchParams({
+            client_id: DISCORD_CLIENT_ID,
+            client_secret: DISCORD_CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: redirectUri,
+        }).toString(),
+        redirectUri,
+        clientId: DISCORD_CLIENT_ID,
+    });
     try {
         exchange = await httpsJSON('POST', 'discord.com', '/api/oauth2/token', {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -482,11 +481,16 @@ async function handleDiscordAuth(req, res) {
             grant_type: 'authorization_code',
             code,
             redirect_uri: redirectUri,
-        }).toString(), DISCORD_API_IP);
+        }).toString());
     } catch (e) {
         warn(`discord: token exchange failed: ${e.message}`);
         return json(res, 502, { message: `discord token exchange failed: ${e.message}` });
     }
+    console.log('TOKEN EXCHANGE RESPONSE', {
+        status: exchange.status,
+        json: exchange.json,
+        textHead: shortLog(exchange.text, 300),
+    });
     const accessToken = exchange.json && exchange.json.access_token;
     if (!accessToken) {
         const dErr = exchange.json && (exchange.json.error || exchange.json.error_description);
@@ -496,13 +500,22 @@ async function handleDiscordAuth(req, res) {
     }
 
     let me;
+    console.log('DISCORD IDENTIFY REQUEST', {
+        url: 'https://discord.com/api/users/@me',
+        authHeader: `Bearer ${accessToken.slice(0, 8)}...`,
+    });
     try {
         me = await httpsJSON('GET', 'discord.com', '/api/users/@me',
-            { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }, DISCORD_API_IP);
+            { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' });
     } catch (e) {
         warn(`discord: identify failed: ${e.message}`);
         return json(res, 502, { message: 'discord identify failed' });
     }
+    console.log('DISCORD IDENTIFY RESPONSE', {
+        status: me.status,
+        json: me.json,
+        textHead: shortLog(me.text, 300),
+    });
     const discordUser = me.json;
     if (!discordUser || discordUser.error || !discordUser.id || !discordUser.username) {
         warn(`discord: identify rejected (${me.status}) ${shortLog(me.text)}`);
