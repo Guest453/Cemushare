@@ -62,6 +62,7 @@ const HOST_TOKEN   = process.env.EMULATOR_HOST_TOKEN || '';
 const JWT_SECRET   = process.env.EMULATOR_JWT_SECRET || 'dev-secret-change-me';
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+const DISCORD_REDIRECT_URI  = (process.env.DISCORD_REDIRECT_URI || 'https://emushare.alkonsafe.dpdns.org/').trim();
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 const LOG_INFO = process.env.EMULATOR_LOG || 'info'; // 'verbose' | 'info' | 'warn' | 'error'
@@ -406,6 +407,10 @@ async function handleLogin(req, res) {
 // one-time `code`, and we exchange it for the user's identify info using the
 // client secret (which NEVER leaves the server). On first sight we auto-create
 // an account keyed to their Discord user id; afterwards we just log them in.
+function shortLog(text, max = 300) {
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
 function httpsJSON(method, hostname, pathname, headers, body) {
     return new Promise((resolve, reject) => {
         const req = https.request({ method, hostname, pathname, headers }, (res) => {
@@ -451,6 +456,7 @@ async function handleDiscordAuth(req, res) {
     let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
     const code = String(body.code || '').trim();
     if (!code) return json(res, 400, { message: 'missing code' });
+    const redirectUri = String(body.redirect_uri || DISCORD_REDIRECT_URI || '').trim();
 
     let exchange;
     try {
@@ -462,6 +468,7 @@ async function handleDiscordAuth(req, res) {
             client_secret: DISCORD_CLIENT_SECRET,
             grant_type: 'authorization_code',
             code,
+            redirect_uri: redirectUri,
         }).toString());
     } catch (e) {
         warn(`discord: token exchange failed: ${e.message}`);
@@ -469,8 +476,8 @@ async function handleDiscordAuth(req, res) {
     }
     const accessToken = exchange.json && exchange.json.access_token;
     if (!accessToken) {
-        const dErr = exchange.json && (exchange.json.error || exchange.text);
-        warn(`discord: token exchange rejected (${exchange.status}) ${exchange.text}`);
+        const dErr = exchange.json && (exchange.json.error || exchange.json.error_description);
+        warn(`discord: token exchange rejected (${exchange.status}) ${shortLog(exchange.text)}`);
         const hint = dErr ? `discord rejection: ${dErr}` : 'discord token exchange failed';
         return json(res, 401, { message: hint });
     }
@@ -485,7 +492,7 @@ async function handleDiscordAuth(req, res) {
     }
     const discordUser = me.json;
     if (!discordUser || discordUser.error || !discordUser.id || !discordUser.username) {
-        warn(`discord: identify rejected (${me.status}) ${me.text}`);
+        warn(`discord: identify rejected (${me.status}) ${shortLog(me.text)}`);
         return json(res, 401, { message: 'discord identify failed' });
     }
 
