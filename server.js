@@ -23,6 +23,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -59,6 +60,8 @@ const SHOTS_DIR    = process.env.EMULATOR_SHOTS_DIR || path.join(DATA_DIR, 'shot
 const DB_PATH      = process.env.EMULATOR_DB || path.join(DATA_DIR, 'emulatorshare.db');
 const HOST_TOKEN   = process.env.EMULATOR_HOST_TOKEN || '';
 const JWT_SECRET   = process.env.EMULATOR_JWT_SECRET || 'dev-secret-change-me';
+const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID || '';
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 const LOG_INFO = process.env.EMULATOR_LOG || 'info'; // 'verbose' | 'info' | 'warn' | 'error'
@@ -116,9 +119,18 @@ db.exec(`
   );
 `);
 
+// Discord-linked accounts: add column to existing DBs, index non-null rows only.
+const userCols = db.prepare('PRAGMA table_info(users)').all();
+if (!userCols.some((c) => c.name === 'discord_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT');
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id) WHERE discord_id IS NOT NULL');
+
 const qUserByName     = db.prepare('SELECT * FROM users WHERE username = ?');
 const qUserById       = db.prepare('SELECT * FROM users WHERE id = ?');
+const qUserByDiscord  = db.prepare('SELECT * FROM users WHERE discord_id = ?');
 const qCreateUser     = db.prepare('INSERT INTO users (username, password_hash, created_at) VALUES (?,?,?)');
+const qCreateDiscordUser = db.prepare('INSERT INTO users (username, password_hash, created_at, discord_id) VALUES (?,?,?,?)');
 const qInsertSession  = db.prepare('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?,?,?,?)');
 const qDeleteSession  = db.prepare('DELETE FROM sessions WHERE token = ? OR expires_at <= ?');
 const qFindSession    = db.prepare('SELECT s.*, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?');
@@ -389,6 +401,112 @@ async function handleLogin(req, res) {
     });
 }
 
+// ── Discord Activity auth ──────────────────────────────────────────────────
+// The viewer opens the page inside a Discord Activity, the SDK hands us a
+// one-time `code`, and we exchange it for the user's identify info using the
+// client secret (which NEVER leaves the server). On first sight we auto-create
+// an account keyed to their Discord user id; afterwards we just log them in.
+function httpsJSON(method, hostname, pathname, headers, body) {
+    return new Promise((resolve, reject) => {
+        const req = https.request({ method, hostname, pathname, headers }, (res) => {
+            let raw = '';
+            res.on('data', (c) => { raw += c; });
+            res.on('end', () => {
+                let parsed = null;
+                try { parsed = JSON.parse(raw); } catch {}
+                resolve({ status: res.statusCode, json: parsed, text: raw });
+            });
+        });
+        req.on('error', reject);
+        if (body) req.write(body);
+        req.end();
+    });
+}
+
+function sanitizeDiscordUsername(raw) {
+    let u = String(raw || '').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 24);
+    u = u.replace(/^[-_.]+/, '').replace(/[-_.]+$/, '');
+    if (u.length < 3) u = (u + '___').slice(0, 24);
+    return u || 'player';
+}
+
+function makeUniqueUsername(base, discordId) {
+    if (!qUserByName.get(base)) return base;
+    const digits = String(discordId).replace(/\D/g, '');
+    const idSuffix = digits.slice(-4) || crypto.randomBytes(2).toString('hex');
+    const cand = `${base.slice(0, 19)}_${idSuffix}`;
+    if (!qUserByName.get(cand)) return cand;
+    for (let n = 2; n < 10000; n++) {
+        const s = String(n);
+        const c = `${base.slice(0, 24 - s.length - 1)}_${s}`;
+        if (c.length >= 3 && !qUserByName.get(c)) return c;
+    }
+    return `${base.slice(0, 21)}_${crypto.randomBytes(2).toString('hex')}`;
+}
+
+async function handleDiscordAuth(req, res) {
+    if (req.method !== 'POST') return json(res, 405, { message: 'method not allowed' });
+    if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET)
+        return json(res, 503, { message: 'discord auth not configured on server' });
+    let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
+    const code = String(body.code || '').trim();
+    if (!code) return json(res, 400, { message: 'missing code' });
+
+    let exchange;
+    try {
+        exchange = await httpsJSON('POST', 'discord.com', '/api/oauth2/token', {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+        }, new URLSearchParams({
+            client_id: DISCORD_CLIENT_ID,
+            client_secret: DISCORD_CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            code,
+        }).toString());
+    } catch (e) {
+        warn(`discord: token exchange failed: ${e.message}`);
+        return json(res, 502, { message: 'discord token exchange failed' });
+    }
+    const accessToken = exchange.json && exchange.json.access_token;
+    if (!accessToken) {
+        warn(`discord: token exchange rejected (${exchange.status}) ${exchange.text}`);
+        return json(res, 401, { message: 'discord authorization failed' });
+    }
+
+    let me;
+    try {
+        me = await httpsJSON('GET', 'discord.com', '/api/users/@me',
+            { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' });
+    } catch (e) {
+        warn(`discord: identify failed: ${e.message}`);
+        return json(res, 502, { message: 'discord identify failed' });
+    }
+    const discordUser = me.json;
+    if (!discordUser || discordUser.error || !discordUser.id || !discordUser.username) {
+        warn(`discord: identify rejected (${me.status}) ${me.text}`);
+        return json(res, 401, { message: 'discord identify failed' });
+    }
+
+    const discordId = String(discordUser.id);
+    let user = qUserByDiscord.get(discordId);
+    if (!user) {
+        const username = makeUniqueUsername(sanitizeDiscordUsername(discordUser.username), discordId);
+        const info = qCreateDiscordUser.run(username, hashPassword(crypto.randomBytes(24).toString('hex')), Date.now(), discordId);
+        user = qUserById.get(Number(info.lastInsertRowid));
+        log(`auth: "${username}" auto-registered via Discord (discord_id=${discordId})`);
+    }
+
+    const ttl = 14 * 24 * 60 * 60 * 1000;
+    const token = makeToken({ sub: user.id, username: user.username }, ttl);
+    qInsertSession.run(token, user.id, Date.now(), Date.now() + ttl);
+    log(`auth: "${user.username}" logged in via Discord (id=${user.id})`);
+    return json(res, 200, {
+        token,
+        user: { id: user.id, username: user.username },
+        discord: { id: discordId, username: discordUser.username },
+    });
+}
+
 function consoleGridToClient() {
     const rows = qListConsoles.all();
     return { consoles: rows.map(publicConsole) };
@@ -401,6 +519,7 @@ const server = http.createServer(async (req, res) => {
     try {
         if (url === '/api/register') return handleRegister(req, res);
         if (url === '/api/login') return handleLogin(req, res);
+        if (url === '/api/discord/auth') return handleDiscordAuth(req, res);
         if (url === '/api/consoles') {
             // Auth optional for browsing; only listing public metadata.
             return json(res, 200, consoleGridToClient());

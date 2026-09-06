@@ -148,6 +148,53 @@ function showAuth() {
 
 const API_BASE = ''
 
+const DISCORD_CLIENT_ID = '1545967983678070816';
+
+let discordAuthTried = false;
+function inDiscordActivity() {
+    const params = new URLSearchParams(location.search || '');
+    return params.has('frame_id');
+}
+
+async function autoDiscordAuth() {
+    if (discordAuthTried) return;
+    discordAuthTried = true;
+    try {
+        const mod = await import('/discord-sdk/output/index.mjs');
+        const { DiscordSDK } = mod;
+        const sdk = new DiscordSDK(DISCORD_CLIENT_ID);
+        await Promise.race([
+            sdk.ready(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('SDK ready timed out')), 5000)),
+        ]);
+        const { code } = await sdk.commands.authorize({
+            client_id: DISCORD_CLIENT_ID,
+            response_type: 'code',
+            state: '',
+            prompt: 'none',
+            scope: ['identify'],
+        });
+        if (!code) throw new Error('no authorization code');
+        const res = await fetch(`${API_BASE}/api/discord/auth`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            showApp();
+        } else {
+            showPrompt(data.message || 'Discord sign-in failed (' + res.status + ')', 'error');
+            if (!localStorage.getItem('token')) showAuth();
+        }
+    } catch (err) {
+        console.warn('Discord activity auto-signup failed:', err);
+        if (!localStorage.getItem('token')) showAuth();
+    }
+}
+
 
 function showApp() {
     document.getElementById('authContainer').classList.add('hidden');
@@ -287,6 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
     buildMobileGamepad();
     bindMobileGamepad();
     applyGamepadVisibility();
+    if (inDiscordActivity()) autoDiscordAuth();
 
     const loginFormEl = document.getElementById('loginFormElement');
     if (loginFormEl) {
