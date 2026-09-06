@@ -259,7 +259,7 @@ function renderConsoles(consoles) {
         card.className = 'console-card bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:shadow-md transition cursor-pointer overflow-hidden'
         card.innerHTML = `
             <div class="console-image">
-                <img src="${sanitizeImageUrl(p.image) || 'no.png'}" alt="${escapeHtml(p.name || 'Console')}" class="block w-full h-full object-cover stretched" onerror="this.src='no.png'">
+                <img src="${sanitizeImageUrl(p.image) || 'no.png'}" alt="${escapeHtml(p.name || 'Console')}" class="block w-full h-full object-cover stretched">
             </div>
             <div class="card-content">
                 <div style="min-width:0;flex:1;">
@@ -277,6 +277,9 @@ function renderConsoles(consoles) {
             </div>
         </div>
         `
+
+        const cardImg = card.querySelector('img')
+        if (cardImg) cardImg.addEventListener('error', () => { cardImg.src = 'no.png' })
 
         card.addEventListener('click', (e) => {
             e.preventDefault()
@@ -594,6 +597,18 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         tutorialClose();
     }
+});
+
+// Delegated clicks for data-action buttons. Inline onclick="" attributes are
+// silently ignored inside the Discord Activity embed, so all static UI buttons
+// route through here instead.
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const act = el.getAttribute('data-action');
+    if (act === 'startRemapCapture') { startRemapCapture(null); return; }
+    const fn = window[act];
+    if (typeof fn === 'function') fn.call(el, e);
 });
 
 // stuff
@@ -1498,6 +1513,13 @@ function saveKeyRemap(map) {
 
 let keyRemap = loadKeyRemap();
 let remapPending = null; // { from: code|null, to: code|null } while capturing
+
+function resetKeyRemap() {
+    keyRemap.clear();
+    saveKeyRemap(keyRemap);
+    renderRemapRows();
+    updateRemapHint('Cleared all remaps.');
+}
 
 function isCaptureKey(code) { return !NON_FORWARDABLE.has(code); }
 
