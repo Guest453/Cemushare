@@ -603,8 +603,15 @@ document.addEventListener('keydown', (e) => {
 // silently ignored inside the Discord Activity embed, so all static UI buttons
 // route through here instead.
 document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-action]');
+    const el = e.target.closest('[data-action], [data-game-action]');
     if (!el) return;
+    const gameAct = el.getAttribute('data-game-action');
+    if (gameAct) {
+        const game = el.getAttribute('data-game');
+        if (gameAct === 'vote') { sendGameVote(game); return; }
+        if (gameAct === 'cast') { sendGameCast(game, el.getAttribute('data-yes') === '1'); return; }
+        return;
+    }
     const act = el.getAttribute('data-action');
     if (act === 'startRemapCapture') { startRemapCapture(null); return; }
     const fn = window[act];
@@ -783,7 +790,7 @@ function renderGames() {
         html += '<div class="flex flex-wrap gap-2">';
         for (const g of gamesList) {
             const isRun = g.key === currentGameKey;
-            html += '<button onclick="sendGameVote(\'' + escapeHtml(g.key) + '\')" class="' +
+            html += '<button data-game-action="vote" data-game="' + escapeHtml(g.key) + '" class="' +
                 (isRun ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700') +
                 ' text-white text-sm font-medium px-3 py-1.5 rounded-md transition-colors" ' +
                 (isRun ? 'disabled' : '') + '>' + escapeHtml(g.name) + '</button>';
@@ -804,8 +811,8 @@ function renderGames() {
         html += '<div class="h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden mb-2">';
         html += '<div class="h-full bg-blue-500" style="width:' + Math.min(100, pct) + '%"></div></div>';
         html += '<div class="flex gap-2">';
-        html += '<button onclick="sendGameCast(\'' + escapeHtml(gameVote.game) + '\',true)" class="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1 rounded-md transition-colors">Yes (' + yesN + ')</button>';
-        html += '<button onclick="sendGameCast(\'' + escapeHtml(gameVote.game) + '\',false)" class="bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-3 py-1 rounded-md transition-colors">No (' + noN + ')</button>';
+        html += '<button data-game-action="cast" data-game="' + escapeHtml(gameVote.game) + '" data-yes="1" class="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1 rounded-md transition-colors">Yes (' + yesN + ')</button>';
+        html += '<button data-game-action="cast" data-game="' + escapeHtml(gameVote.game) + '" data-yes="0" class="bg-red-600 hover:bg-red-700 text-white text-xs font-medium px-3 py-1 rounded-md transition-colors">No (' + noN + ')</button>';
         html += '</div></div>';
     }
 
