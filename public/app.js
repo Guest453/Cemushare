@@ -1343,9 +1343,27 @@ function flushInput(msg) {
     if (!streamWs || streamWs.readyState !== WebSocket.OPEN) return;
     streamWs.send(JSON.stringify({
         t: 'input',
-        keys: msg.keys !== undefined ? msg.keys : [...heldInputKeys],
+        keys: msg.keys !== undefined ? msg.keys : effectiveHeldKeys(),
         mouse: msg.mouse || null,
     }));
+}
+
+// Key chords: when every code in a chord's `keys` is held at the same time,
+// forward the chord's `to` code instead of the individual keys (raw e.code
+// values, applied after any remaps). Lets G+H act as F1.
+const KEY_CHORDS = [
+    { keys: ['KeyG', 'KeyH'], to: 'F1' },
+];
+function effectiveHeldKeys() {
+    const out = new Set();
+    for (const code of heldInputKeys) {
+        const consumed = KEY_CHORDS.some((c) => c.keys.includes(code) && c.keys.every((k) => heldInputKeys.has(k)));
+        if (!consumed) out.add(code);
+    }
+    for (const c of KEY_CHORDS) {
+        if (c.keys.every((k) => heldInputKeys.has(k))) out.add(c.to);
+    }
+    return [...out];
 }
 
 // ── Key remapping (PC) + on-screen gamepad (mobile) ──────────────────────────
