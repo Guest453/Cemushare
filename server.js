@@ -351,12 +351,18 @@ function readBody(req, cap = 32 * 1024) {
     });
 }
 
+function consoleShotUrl(key) {
+    const safe = String(key).replace(/[^a-zA-Z0-9._-]/g, '_');
+    try { if (fs.existsSync(path.join(SHOTS_DIR, `${safe}.jpg`))) return `/shots/${safe}.jpg`; } catch {}
+    return null;
+}
+
 function publicConsole(c) {
     const live = consoles.get(c.key);
     return {
         key: c.key,
         name: c.name,
-        image: c.image,
+        image: consoleShotUrl(c.key) || c.image,
         category: c.category,
         description: c.description,
         online: !!(live && live.hostAlive),
