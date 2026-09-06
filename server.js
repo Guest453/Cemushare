@@ -469,8 +469,10 @@ async function handleDiscordAuth(req, res) {
     }
     const accessToken = exchange.json && exchange.json.access_token;
     if (!accessToken) {
+        const dErr = exchange.json && (exchange.json.error || exchange.text);
         warn(`discord: token exchange rejected (${exchange.status}) ${exchange.text}`);
-        return json(res, 401, { message: 'discord authorization failed' });
+        const hint = dErr ? `discord rejection: ${dErr}` : 'discord token exchange failed';
+        return json(res, 401, { message: hint });
     }
 
     let me;
