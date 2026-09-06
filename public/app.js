@@ -973,9 +973,28 @@ async function configureVideo(config) {
     __decoderErrorFn = (e) => {
         console.error('[decoder ERROR]', e);
         waitingForKeyframe = true;
-        setStreamStatus('decode error (' + decoderErrorMsg(e) + ') - waiting for keyframe' + decodeSupportStatus());
-        if (decoderConfig) {
-            try { videoDecoder.configure(decoderConfig); } catch {}
+        const errText = decoderErrorMsg(e);
+        setStreamStatus('decode error (' + errText + ') - waiting for keyframe' + decodeSupportStatus());
+        // Chrome reports configs as supported that then fail to instantiate,
+        // especially H.264 with hardwareAcceleration:'prefer-software' inside
+        // embedded host apps (Discord Activity) where the software H.264 path
+        // doesn't exist. Fall back to the default hint and retry with a new
+        // decoder + fresh keyframe.
+        const unsupported = /unsupported|not supported|not.?a?valad|invalid config/i.test(errText);
+        if (unsupported && decoderConfig && decoderConfig.hardwareAcceleration === 'prefer-software') {
+            const retry = { ...decoderConfig };
+            retry.hardwareAcceleration = 'no-preference';
+            decoderConfig = retry;
+            console.warn('[decoder] "Unsupported configuration" with prefer-software; retrying with no-preference');
+            setStreamStatus('decode retrying without the prefer-software hint…');
+            try {
+                videoDecoder = new VideoDecoder({ output: __decoderOutputFn, error: __decoderErrorFn });
+                videoDecoder.configure(decoderConfig);
+            } catch (err2) {
+                console.error('[decoder] fallback configure failed', err2);
+            }
+        } else if (decoderConfig) {
+            try { if (videoDecoder && videoDecoder.state !== 'closed') videoDecoder.configure(decoderConfig); } catch {}
         }
         // Ask the host to force a fresh keyframe NOW (restart the encoder) so we
         // resync immediately instead of freezing until the next natural GOP.
