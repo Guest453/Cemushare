@@ -1,39 +1,112 @@
 # emulatorSHARE
 
-Share **many emulators with many people at once.** Each console is a headless
-Chromium running one emulator; its canvas + game audio are WebCodecs-encoded and
-streamed to every connected viewer. Viewers never run the emulator - they get
-pixels, and they press buttons into a shared input pile that feeds the host.
+Let a room full of people play one machine at the same time. A host streams its
+screen + audio to the relay, and every connected viewer watches, chats, and
+presses buttons into a shared input pile that gets replayed on that machine.
+Viewers never run the game - they get pixels.
+
+There are two kinds of host:
+
+- **Full host (recommended)** - streams a real Linux desktop. Games are plain
+  Linux binaries listed in `games.json`; viewers vote on which one to launch.
+- **Headless-Chromium host (deprecated)** - legacy mode that ran WASM emulators
+  (like an Emscripten build of an emulator) inside headless Chromium, one per
+  console. It still works but is no longer the supported way to host.
 
 ```
-host (headless Chromium) ─ws /host─► [ relay server.js ] ─ws /stream─► viewers
-host  ◄── merged input/controller ─────────► relay ◄─── buttons/mouse / chat
+ host (full Linux desktop) ->ws /host-> [ relay server.js ] -ws /stream-> viewers
+ host <- merged input/controller ------------ relay <----- buttons/mouse/chat
 ```
 
 Consoles are **dynamic**: nothing is hardcoded. When a host boots, it connects
-to `/host?token=…&console=<key>`, sends a `register` frame (name, image,
+to `/host?token=...&console=<key>`, sends a `register` frame (name, image,
 category, description), and the relay creates or updates that console in its
-SQLite database. Viewers then discover it in the grid and connect via
-`/stream?token=…&console=<key>`. Spin up a new game dir and it becomes a console.
+SQLite database. Viewers discover it in the grid and connect via
+`/stream?token=...&console=<key>`.
 
-## Stack
+## Stream a desktop into it (full host, recommended)
 
-- **server.js** - the relay (`ws`), auth (username/password via scrypt), signed
-  viewer tokens, and SQLite (`better-sqlite3`) for users, sessions, and the
-  console registry. Per-console: viewer fan-out, key/mouse merge (anarchy or
-  majority democracy), keyframe cache, watchdog, chat, and a live roster.
-- **host/** - `host.js` (shared headless-Chromium runtime: viewport pinning,
-  render shrink, audio capture, WebCodecs encode, input replay) and
-  `serve-host.js` (loopback static server per console so the container's own
-  Chromium can load the game, and nobody else can).
-- **public/** - the viewer web app (login/register, console grid, stream viewer
-  with WebCodecs decode, on-screen + keyboard controls, chat, player list).
-- **consoles/** - each named folder is a console: `index.html` (loads
-  `/ _shared/host.js` then the emulator bundle) plus `bin/` for the game
-  binaries. `demo/` is a self-contained canvas console that tests the whole
-  pipeline without a real ROM.
+The full host is a **Linux** machine that runs a real virtual desktop and
+encodes it to the stream. It needs a handful of native tools:
 
-## Run it
+```bash
+sudo apt install xvfb xfwm4 pulseaudio ffmpeg xdotool
+```
+
+Then point it at your relay (which can be any machine on your network):
+
+```bash
+npm run host-full -- --url ws://192.168.1.20:8090 \
+    --token <EMULATOR_HOST_TOKEN> \
+    --console playground --name "Linux Playground" --games games.json
+```
+
+What it does:
+
+- starts `Xvfb` (the virtual display viewers see), `xfwm4` (a window manager
+  so launched games get decorated windows), and `pulseaudio` (game audio +
+  mouse/keyboard replay) on the display,
+- encodes that desktop with `ffmpeg` (VP8 or H.264 video, Opus audio) and
+  streams it to your relay's `/host` WebSocket,
+- registers the console and shows it in the viewer grid the moment it connects.
+
+Key options (`npm run host-full -- --help` for all):
+
+- `--games <path>` - `games.json` describing launchable games (default
+  `games.json` at the repo root; see `games.example.json`),
+- `--video-codec <h264|vp8>` - encoder for the video stream (default `h264`),
+- `--resx --resy` - virtual display resolution (default = `--w` x `--h`),
+- `--w --h --fps --bitrate` - pixel size / frame rate / bitrate of the stream,
+- `--keys <all|none|list>` - which keys viewers may send, e.g.
+  `w,a,s,d,space` to allow only an allowlist,
+- `--motd` - message posted to chat when someone joins,
+- `--check` - verify all required binaries + `games.json` and exit.
+
+### games.json and voting
+
+Copy `games.example.json` to `games.json` and list one entry per launchable
+game: `key` (unique id), `name` (shown to viewers), `command` (argv, first item
+on PATH or absolute path), plus optional `cwd`/`env`:
+
+```json
+{
+  "games": [
+    { "key": "srb2", "name": "Sonic Robo Blast 2", "command": ["/usr/bin/srb2", "-opengl"] },
+    { "key": "dosbox", "name": "DOSBox", "command": ["/usr/bin/dosbox"], "env": { "SDL_FULLSCREEN": "0" } }
+  ]
+}
+```
+
+Any viewer can propose launching a game; the other viewers vote
+yes/no against the `needed` threshold. When a vote passes the relay replies
+`launch` and the full host starts that game's command on the virtual display.
+Viewer input is replayed with `xdotool`.
+
+> **Note:** The full host is Linux-only. Every tool it needs (Xvfb, xfwm4,
+> pulseaudio, ffmpeg, xdotool) is a native Linux binary.
+
+## Legacy: headless-Chromium host (deprecated)
+
+This is the original mode. Instead of a real desktop, each console is an
+**Emscripten/SDL emulator** (e.g. `sm64.js`/`sm64.wasm`) running inside
+headless Chromium; `host/` (`host.js` + `serve-host.js`) captures that canvas
+and audio with WebCodecs and `bin/launch-host.js` boots it:
+
+```bash
+npm run host-console -- --url ws://192.168.1.20:8090 \
+    --token <EMULATOR_HOST_TOKEN> \
+    --console mario64 --dir consoles/mario64 \
+    --name "Super Mario 64" --category "Nintendo 64"
+```
+
+It still runs, but it is **deprecated** - new setups should use the full host
+(`npm run host-full`), which hosts arbitrary native games instead of one
+WASM emulator per console. Some caveats that motivated the deprecation:
+Windows hosting was buggy (the software-GL emulator stutters whenever other
+GPU-heavy Chromium windows are foregrounded) and consoles were folders of
+hand-authored `index.html` files rather than plain `games.json` entries.
+
+## Run the relay (the server)
 
 ```bash
 npm install
@@ -41,59 +114,33 @@ cp .env.example .env            # set EMULATOR_HOST_TOKEN + EMULATOR_JWT_SECRET
 node server.js                  # relay on :8090, serves public/ + API
 ```
 
-Open http://localhost:8090, register, and log in.
+Open http://localhost:8090, register, and log in. For the server to accept
+remote hosts it must be reachable over the network (it already binds
+`0.0.0.0`) and you must share `EMULATOR_HOST_TOKEN`.
 
-### Add a console from this machine (standalone host launcher)
+## Stack
 
-The relay alone doesn't run any games - each console is a headless Chromium.
-Run `npm run host-console` on **any machine that has Chrome/Edge** to stream a
-console in from there (you can even point it at a server on another computer):
-
-```bash
-# on your machine, streaming into a relay at ws://192.168.1.20:8090
-npm run host-console -- --url ws://192.168.1.20:8090 \
-    --token <EMULATOR_HOST_TOKEN> \
-    --console mario64 --dir consoles/mario64 \
-    --name "Super Mario 64" --category "Nintendo 64"
-```
-
-This boots a local static server for the console's host page + binaries, then
-launches headless Chromium pointed at your server's `/host` WebSocket. The
-console registers itself and starts streaming; viewers on the server see it the
-moment it connects. Run `npm run host-console -- --help` for all options
-(`--w --h --fps --bitrate --port --profile`), or `--interactive` to be prompted.
-Set `CHROME_BIN` to a specific Chrome/Edge path if the auto-detector misses it.
-
-> **⚠ Hosting on Windows is currently buggy and unsupported right now.** The
-> headless host's software-GL emulator is heavily throttled/starved whenever any
-> other GPU-heavy Chromium window is foregrounded (the viewer, Discord, etc.),
-> causing game + audio stutter. It's a Windows-specific occlusion/contention
-> quirk. Use Linux for reliable hosting; the viewer works fine anywhere.
-
-For the server to accept remote hosts it must be reachable over the network
-(it already binds `0.0.0.0`) and you must share `EMULATOR_HOST_TOKEN`.
-
-## Adding a console
-
-1. Create `consoles/<key>/` with an `index.html` (host page) and `bin/`.
-2. The host page must:
-   - include `<canvas … data-host-canvas="1">` (the one to stream),
-   - `<script src="/_shared/host.js"></script>` **before** the emulator bundle,
-   - call `window.__hostStart()` when the game runtime is ready.
-3. Stream it in with `npm run host-console` (see above): the host page's
-   `register` frame tells the relay the console's name, image, category, and
-   description, so nothing needs to be hardcoded or pre-registered on the
-   server.
-
-Drop a real emulator bundle (as an Emscripten/SDL build like `sm64.js`/`sm64.wasm`)
-into `consoles/<key>/bin/` and reference it from `<key>/index.html`.
+- **server.js** - the relay (`ws`), auth (username/password via scrypt), signed
+  viewer tokens, and SQLite (`better-sqlite3`) for users, sessions, and the
+  console registry. Per-console: viewer fan-out, key/mouse merge (anarchy or
+  majority democracy), keyframe cache, watchdog, chat, votes, and a live roster.
+- **bin/launch-full-host.js** - the full host: Xvfb + xfwm4 + pulseaudio,
+  `ffmpeg` capture (VP8/H.264 + Opus), xdotool input replay, and the
+  `games.json` vote-to-launch flow.
+- **bin/launch-host.js** + **host/** - the legacy headless-Chromium host
+  (WebCodecs capture, `serve-host.js` loopback static server). Deprecated.
+- **public/** - the viewer web app (login/register, console grid, stream viewer
+  with WebCodecs decode, on-screen + keyboard controls, chat, player list).
+- **consoles/** - legacy console definitions for the deprecated Chromium host
+  (`index.html` host page + `bin/`); `demo/` is a self-contained canvas console
+  that tests the whole pipeline without a real ROM.
 
 ## Protocol
 
 Media frames: `[kind:u8][timestamp:f64][payload]`, kinds `2`=video-keyframe,
-`3`=video-delta, `5`=audio-chunk. Config `vconfig`/`aconfig`, roster, chat, input,
-vote, mode, held, keyframe, and reload are JSON control messages on the same
-sockets. See `server.js` and `test/protocol.test.js`.
+`3`=video-delta, `5`=audio-chunk. Config `vconfig`/`aconfig`, roster, chat,
+input, vote, mode, held, keyframe, reload, and launch are JSON control messages
+on the same sockets. See `server.js` and `test/protocol.test.js`.
 
 ## Test
 
