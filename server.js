@@ -415,7 +415,7 @@ function publicConsole(c) {
 // ── HTTP handlers ───────────────────────────────────────────────────────────
 async function handleRegister(req, res) {
     if (req.method !== 'POST') return json(res, 405, { message: 'method not allowed' });
-    if (authRateLimited(req, '/api/register')) return json(res, 429, { message: 'too many attempts — slow down and retry in a minute' });
+    if (authRateLimited(req, '/api/register')) return json(res, 429, { message: 'you are a birdvirus rate limiter' });
     let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
     const username = String(body.username || '').trim();
     const password = String(body.password || '');
@@ -432,7 +432,7 @@ async function handleRegister(req, res) {
 
 async function handleLogin(req, res) {
     if (req.method !== 'POST') return json(res, 405, { message: 'method not allowed' });
-    if (authRateLimited(req, '/api/login')) return json(res, 429, { message: 'too many attempts — slow down and retry in a minute' });
+    if (authRateLimited(req, '/api/login')) return json(res, 429, { message: 'you are a birdvirus rate limiter' });
     let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
     const username = String(body.username || '').trim();
     const password = String(body.password || '');
@@ -501,7 +501,7 @@ function makeUniqueUsername(base, discordId) {
 
 async function handleDiscordAuth(req, res) {
     if (req.method !== 'POST') return json(res, 405, { message: 'method not allowed' });
-    if (authRateLimited(req, '/api/discord/auth')) return json(res, 429, { message: 'too many attempts — slow down and retry in a minute' });
+    if (authRateLimited(req, '/api/discord/auth')) return json(res, 429, { message: 'you are a birdvirus rate limiter' });
     if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET)
         return json(res, 503, { message: 'discord auth not configured on server' });
     let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
