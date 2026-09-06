@@ -284,6 +284,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initTouchSound();
     checkAuth();
+    buildMobileGamepad();
+    bindMobileGamepad();
+    applyGamepadVisibility();
 
     const loginFormEl = document.getElementById('loginFormElement');
     if (loginFormEl) {
@@ -535,6 +538,7 @@ async function openConsoleViewer(consoleName) {
     
     document.getElementById('mainPage').classList.add('hidden')
     document.getElementById('consoleViewerPage').classList.remove('hidden')
+    applyGamepadVisibility()
     
     connectStreamWs(consoleName)
     setupChatForm()
@@ -1344,13 +1348,224 @@ function flushInput(msg) {
     }));
 }
 
+// ── Key remapping (PC) + on-screen gamepad (mobile) ──────────────────────────
+// Users can remap physical keys to other keys (stored in localStorage) and get
+// an on-screen pad on touch devices. Both feed the same setInputKey path, so a
+// remap also applies to the mobile pad (e.g. bind Y = lightswitch easily).
+const KEY_REMAP_STORAGE = 'emulatorKeyRemap.v1';
+
+function loadKeyRemap() {
+    try {
+        const raw = localStorage.getItem(KEY_REMAP_STORAGE);
+        if (!raw) return new Map();
+        const obj = JSON.parse(raw);
+        const m = new Map();
+        for (const k of Object.keys(obj)) m.set(k, obj[k]);
+        return m;
+    } catch { return new Map(); }
+}
+function saveKeyRemap(map) {
+    try {
+        const obj = {};
+        for (const [k, v] of map.entries()) obj[k] = v;
+        localStorage.setItem(KEY_REMAP_STORAGE, JSON.stringify(obj));
+    } catch { }
+}
+
+let keyRemap = loadKeyRemap();
+let remapPending = null; // { from: code|null, to: code|null } while capturing
+
+function isCaptureKey(code) { return !NON_FORWARDABLE.has(code); }
+
+function handleRemapKeydown(e) {
+    e.preventDefault();
+    if (e.key === 'Escape') { remapPending = null; updateRemapHint('Cancelled.'); renderRemapRows(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!isCaptureKey(e.code)) { updateRemapHint(`"${codeLabel(e.code)}" can't be remapped.`); return; }
+    if (remapPending.from === null) {
+        remapPending.from = e.code;
+        updateRemapHint(`Source: ${codeLabel(e.code)}. Now press a key for it to act as (Esc to cancel).`);
+        renderRemapRows();
+        return;
+    }
+    remapPending.to = e.code;
+    if (remapPending.from === remapPending.to) {
+        keyRemap.delete(remapPending.from);
+    } else {
+        keyRemap.set(remapPending.from, remapPending.to);
+    }
+    saveKeyRemap(keyRemap);
+    remapPending = null;
+    updateRemapHint('Saved.');
+    renderRemapRows();
+}
+
+function codeLabel(code) {
+    return code
+        .replace('Key', '')
+        .replace('Digit', '')
+        .replace('ArrowLeft', '◀')
+        .replace('ArrowRight', '▶')
+        .replace('ArrowUp', '▲')
+        .replace('ArrowDown', '▼')
+        .replace('Space', 'SPACE')
+        .replace('Enter', 'ENTER')
+        .replace('Escape', 'Esc')
+        .replace('ShiftLeft', 'L-Shift')
+        .replace('ShiftRight', 'R-Shift')
+        .replace('ControlLeft', 'L-Ctrl')
+        .replace('AltLeft', 'L-Alt');
+}
+
+function updateRemapHint(text) {
+    const box = document.getElementById('remapHint');
+    if (box) box.textContent = text;
+}
+
+function renderRemapRows() {
+    const list = document.getElementById('remapList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (keyRemap.size === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-sm text-gray-500 dark:text-gray-400';
+        empty.textContent = 'No remaps yet. Click "Add remap" to create one.';
+        list.appendChild(empty);
+        return;
+    }
+    const entries = Array.from(keyRemap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [from, to] of entries) {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 justify-between bg-gray-100 dark:bg-gray-700 rounded px-3 py-2';
+
+        const pair = document.createElement('div');
+        pair.className = 'flex items-center gap-2';
+        const f = document.createElement('span');
+        f.className = 'font-mono text-sm font-semibold dark:text-white';
+        f.textContent = codeLabel(from);
+        const arrow = document.createElement('span');
+        arrow.className = 'text-gray-400';
+        arrow.textContent = '→';
+        const t = document.createElement('span');
+        t.className = 'font-mono text-sm text-indigo-600 dark:text-indigo-400 font-semibold';
+        t.textContent = codeLabel(to);
+        pair.append(f, arrow, t);
+
+        const change = document.createElement('button');
+        change.className = 'rounded bg-gray-500 hover:bg-gray-600 text-white text-xs px-2 py-1';
+        change.textContent = 'Change';
+        change.onclick = (ev) => { ev.stopPropagation(); startRemapCapture(from); };
+
+        const del = document.createElement('button');
+        del.className = 'rounded bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1';
+        del.textContent = 'Remove';
+        del.onclick = (ev) => {
+            ev.stopPropagation();
+            keyRemap.delete(from);
+            saveKeyRemap(keyRemap);
+            renderRemapRows();
+        };
+
+        row.append(pair, change, del);
+        list.appendChild(row);
+    }
+}
+
+function startRemapCapture(from) {
+    remapPending = { from: from || null, to: null };
+    if (from) updateRemapHint(`Press a key to act as ${codeLabel(from)} (Esc to cancel).`);
+    else updateRemapHint('Press the source key you want to remap (Esc to cancel).');
+    const active = document.activeElement;
+    if (active && active.blur && active.tagName === 'BUTTON') active.blur();
+}
+
+function openRemapModal() {
+    remapPending = null;
+    renderRemapRows();
+    updateRemapHint('Click "Add remap", then press the source key and the key it should act as.');
+    document.getElementById('remapModal').classList.remove('hidden');
+    if (heldInputKeys.size) { heldInputKeys.clear(); flushInput({ mouse: null }); }
+}
+function closeRemapModal() {
+    remapPending = null;
+    document.getElementById('remapModal').classList.add('hidden');
+}
+
+// ── On-screen mobile gamepad ────────────────────────────────────────────────
+const IS_TOUCH_DEVICE = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+const MOBILE_PAD_ROWS = [
+    ['KeyW', 'KeyA', 'KeyS', 'KeyD'],
+    ['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'],
+    ['Space', 'Enter', 'ShiftRight', 'Tab', 'Escape'],
+    ['KeyZ', 'KeyX', 'KeyE', 'KeyQ', 'KeyR', 'KeyC'],
+];
+
+function buildMobileGamepad() {
+    const pad = document.getElementById('mobileGamepad');
+    if (!pad) return;
+    pad.innerHTML = '';
+    for (const row of MOBILE_PAD_ROWS) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'flex flex-wrap justify-center gap-2 mb-2';
+        for (const code of row) {
+            const b = document.createElement('button');
+            b.className = 'padkey flex-1 min-w-[52px] h-12 rounded-lg shadow font-mono text-sm font-semibold text-white bg-gray-700 dark:bg-gray-700 active:bg-indigo-500 select-none touch-none flex items-center justify-center';
+            b.textContent = codeLabel(code);
+            b.dataset.code = code;
+            rowEl.appendChild(b);
+        }
+        pad.appendChild(rowEl);
+    }
+}
+
+function padCodeDown(code) {
+    unlockAudio();
+    setInputKey(keyRemap.get(code) || code, true);
+}
+function padCodeUp(code) {
+    setInputKey(keyRemap.get(code) || code, false);
+}
+
+function bindMobileGamepad() {
+    const pad = document.getElementById('mobileGamepad');
+    if (!pad) return;
+    pad.addEventListener('pointerdown', (e) => {
+        const b = e.target.closest('.padkey');
+        if (!b) return;
+        e.preventDefault();
+        b.setPointerCapture && b.setPointerCapture(e.pointerId);
+        padCodeDown(b.dataset.code);
+    });
+    const release = (e) => {
+        const b = e.target.closest('.padkey');
+        if (!b) return;
+        padCodeUp(b.dataset.code);
+    };
+    pad.addEventListener('pointerup', release);
+    pad.addEventListener('pointercancel', release);
+    pad.addEventListener('pointerleave', release);
+}
+
+let gamepadVisible = true;
+function applyGamepadVisibility() {
+    document.getElementById('toggleGamepadBtn').classList.toggle('hidden', !IS_TOUCH_DEVICE);
+    document.getElementById('mobileGamepad').classList.toggle('hidden', !IS_TOUCH_DEVICE || !gamepadVisible);
+    document.getElementById('remapBtn').classList.toggle('hidden', IS_TOUCH_DEVICE);
+}
+
+function toggleGamepad() {
+    gamepadVisible = !gamepadVisible;
+    applyGamepadVisibility();
+}
+
 // Global keyboard forwarding - track a held-key set so releases actually reach
 // the server (a single [code] on keydown with no keyup would leave buttons
 // stuck down forever and pin the game for everyone).
 //
 // Keys are forwarded with their raw e.code — no aliasing. WASD must reach the
 // game as KeyW/KeyA/KeyS/KeyD so games bound to those keys work; the host is
-// the single place that filters (--keys allowlist).
+// the single place that filters (--keys allowlist). A local remap can translate
+// e.code → e.code first (install via the "Remap keys" modal).
 const heldInputKeys = new Set();
 // Keys that are pure modifiers / browser-reserved and must never reach the host.
 const NON_FORWARDABLE = new Set([
@@ -1367,18 +1582,29 @@ function setInputKey(code, down) {
 window.addEventListener('keydown', (e) => {
     if (!currentConsoleName) return;
     if (isTypingField(e.target)) return;
+    const remapModalEl = document.getElementById('remapModal');
+    if (remapModalEl && !remapModalEl.classList.contains('hidden')) {
+        if (remapPending) handleRemapKeydown(e);
+        return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;   // browser/OS combos stay local
-    if (NON_FORWARDABLE.has(e.code)) return;
+    const code = keyRemap.get(e.code) || e.code;
+    if (NON_FORWARDABLE.has(code)) return;
     e.preventDefault();
-    if (!e.repeat) setInputKey(e.code, true);
+    if (!e.repeat) setInputKey(code, true);
 });
 window.addEventListener('keyup', (e) => {
     if (!currentConsoleName) return;
     if (isTypingField(e.target)) return;
+    const remapModalEl = document.getElementById('remapModal');
+    if (remapModalEl && !remapModalEl.classList.contains('hidden')) {
+        return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (NON_FORWARDABLE.has(e.code)) return;
+    const code = keyRemap.get(e.code) || e.code;
+    if (NON_FORWARDABLE.has(code)) return;
     e.preventDefault();
-    setInputKey(e.code, false);
+    setInputKey(code, false);
 });
 // Releasing focus mid-press would leave a key stuck; clear everything.
 window.addEventListener('blur', () => {

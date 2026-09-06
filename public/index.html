@@ -157,6 +157,30 @@
                     <div id="streamStatus" class="hidden absolute inset-0 flex items-center justify-center text-gray-500 dark:text-gray-300 font-mono text-sm"></div>
                 </div>
 
+                <div class="mt-3 flex w-full max-w-[720px] gap-2">
+                    <button id="toggleGamepadBtn" onclick="toggleGamepad()" class="hidden select-none rounded-lg px-3 py-1.5 text-sm shadow bg-indigo-500 text-white active:bg-indigo-600">Keyboard (on-screen)</button>
+                    <button id="remapBtn" onclick="openRemapModal()" class="hidden select-none rounded-lg px-3 py-1.5 text-sm shadow bg-gray-500 text-white active:bg-gray-600">Remap keys</button>
+                </div>
+
+                <div id="mobileGamepad" class="hidden select-none touch-none mt-3 w-full max-w-[720px] mx-auto"></div>
+
+                <!-- Key remap modal -->
+                <div id="remapModal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+                    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeRemapModal()"></div>
+                    <div class="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-5 w-[440px] max-w-[90vw]">
+                        <h2 class="text-lg font-semibold mb-3 dark:text-white">Remap keys</h2>
+                        <div id="remapHint" class="text-sm text-gray-500 dark:text-gray-400"></div>
+                        <div id="remapList" class="space-y-2 max-h-[50vh] overflow-y-auto my-3"></div>
+                        <div class="mt-4 flex justify-between gap-2">
+                            <button onclick="startRemapCapture(null)" class="rounded-lg px-3 py-1.5 text-sm bg-indigo-500 text-white">Add remap</button>
+                            <div class="flex gap-2">
+                                <button id="remapReset" onclick="keyRemap.clear(); saveKeyRemap(keyRemap); renderRemapRows(); updateRemapHint('Cleared all remaps.');" class="rounded-lg px-3 py-1.5 text-sm bg-red-500 text-white">Reset all</button>
+                                <button id="remapClose" onclick="closeRemapModal()" class="rounded-lg px-3 py-1.5 text-sm bg-gray-500 text-white">Done</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="gamesPanel" class="hidden mt-3 w-[720px] max-w-full mx-auto">
                     <div id="gamesBox" class="shadow bg-white dark:bg-gray-700 rounded-lg p-4 border border-gray-300 dark:border-gray-600"></div>
                 </div>
