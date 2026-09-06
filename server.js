@@ -465,7 +465,7 @@ async function handleDiscordAuth(req, res) {
         }).toString());
     } catch (e) {
         warn(`discord: token exchange failed: ${e.message}`);
-        return json(res, 502, { message: 'discord token exchange failed' });
+        return json(res, 502, { message: `discord token exchange failed: ${e.message}` });
     }
     const accessToken = exchange.json && exchange.json.access_token;
     if (!accessToken) {
