@@ -980,7 +980,7 @@ async function configureVideo(config) {
         // embedded host apps (Discord Activity) where the software H.264 path
         // doesn't exist. Fall back to the default hint and retry with a new
         // decoder + fresh keyframe.
-        const unsupported = /unsupported|not supported|not.?a?valad|invalid config/i.test(errText);
+        const unsupported = /unsupported configuration|not supported|invalid config/i.test(errText);
         if (unsupported && decoderConfig && decoderConfig.hardwareAcceleration === 'prefer-software') {
             const retry = { ...decoderConfig };
             retry.hardwareAcceleration = 'no-preference';
