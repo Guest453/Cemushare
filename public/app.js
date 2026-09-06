@@ -841,10 +841,13 @@ function getStreamCanvas() {
     return document.getElementById('consoleCanvas');
 }
 
+let decoderProbe = null;
+
 async function probeCodecSupport() {
+    if (decoderProbe) return decoderProbe;
     if (typeof VideoDecoder === 'undefined') {
         console.warn('[probe] VideoDecoder API is NOT available in this browser');
-        return;
+        return [];
     }
     const candidates = [
         { codec: 'avc1.42E01F' },
@@ -855,14 +858,24 @@ async function probeCodecSupport() {
         { codec: 'h264' },
         { codec: 'hevc' },
     ];
+    const results = [];
     for (const c of candidates) {
         try {
             const s = await VideoDecoder.isConfigSupported({ codec: c.codec, codedWidth: 782, codedHeight: 614 });
-            console.warn(`[probe] ${c.codec} => supported=${s && s.supported}`);
+            results.push({ codec: c.codec, supported: !!(s && s.supported) });
+            console.warn(`[probe] ${c.codec} => supported=${!!(s && s.supported)}`);
         } catch (e) {
+            results.push({ codec: c.codec, supported: false });
             console.warn(`[probe] ${c.codec} => threw: ${e && e.message}`);
         }
     }
+    decoderProbe = results;
+    return results;
+}
+
+function decodeSupportStatus() {
+    if (!decoderProbe || !decoderProbe.length) return '';
+    return ' [browser supports: ' + decoderProbe.map(p => p.codec + (p.supported ? '✓' : '✗')).join(' ') + ']';
 }
 
 async function configureVideo(config) {
@@ -927,12 +940,12 @@ async function configureVideo(config) {
                 hasDescription: !!decoderConfig.description,
                 reason,
             }));
-            setStreamStatus(`browser can't decode ${config.codec} (${reason})`);
+            setStreamStatus(`browser can't decode ${config.codec} (${reason})` + decodeSupportStatus());
             return;
         }
     } catch (e) {
         console.warn('[decoder] isConfigSupported threw:', e);
-        setStreamStatus(`browser can't decode ${config.codec}`);
+        setStreamStatus(`browser can't decode ${config.codec}` + decodeSupportStatus());
         return;
     }
 
@@ -960,7 +973,7 @@ async function configureVideo(config) {
     __decoderErrorFn = (e) => {
         console.error('[decoder ERROR]', e);
         waitingForKeyframe = true;
-        setStreamStatus('decode error (' + decoderErrorMsg(e) + ') - waiting for keyframe');
+        setStreamStatus('decode error (' + decoderErrorMsg(e) + ') - waiting for keyframe' + decodeSupportStatus());
         if (decoderConfig) {
             try { videoDecoder.configure(decoderConfig); } catch {}
         }
