@@ -813,6 +813,14 @@ function setStreamStatus(text) {
     streamStatusEl.classList.toggle('hidden', !text);
 }
 
+function decoderErrorMsg(e) {
+    if (!e) return '(unknown)';
+    const m = e && e.message ? String(e.message) : '';
+    const n = e && e.name ? String(e.name) : '';
+    if (m && n) return n + ': ' + m;
+    return m || n || String(e);
+}
+
 function stopStream() {
     if (streamWs) { try { streamWs.close(); } catch {} streamWs = null; }
     if (videoDecoder && videoDecoder.state !== 'closed') { try { videoDecoder.close(); } catch {} videoDecoder = null; }
@@ -952,7 +960,7 @@ async function configureVideo(config) {
     __decoderErrorFn = (e) => {
         console.error('[decoder ERROR]', e);
         waitingForKeyframe = true;
-        setStreamStatus('decode error - waiting for keyframe');
+        setStreamStatus('decode error (' + decoderErrorMsg(e) + ') - waiting for keyframe');
         if (decoderConfig) {
             try { videoDecoder.configure(decoderConfig); } catch {}
         }
