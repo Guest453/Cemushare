@@ -167,20 +167,18 @@ async function autoDiscordAuth() {
             sdk.ready(),
             new Promise((_, rej) => setTimeout(() => rej(new Error('SDK ready timed out')), 5000)),
         ]);
-        const redirect_uri = window.location.origin + '/';
         const { code } = await sdk.commands.authorize({
             client_id: DISCORD_CLIENT_ID,
             response_type: 'code',
             state: '',
             prompt: 'none',
-            redirect_uri,
             scope: ['identify'],
         });
         if (!code) throw new Error('no authorization code');
         const res = await fetch(`${API_BASE}/api/discord/auth`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code, redirect_uri }),
+            body: JSON.stringify({ code }),
         });
         const data = await res.json();
         if (res.ok && data.token) {

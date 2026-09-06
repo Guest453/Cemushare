@@ -456,7 +456,7 @@ async function handleDiscordAuth(req, res) {
     let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { message: 'bad request' }); }
     const code = String(body.code || '').trim();
     if (!code) return json(res, 400, { message: 'missing code' });
-    const redirectUri = String(body.redirect_uri || DISCORD_REDIRECT_URI || '').trim();
+    const redirectUri = DISCORD_REDIRECT_URI;
 
     let exchange;
     try {
