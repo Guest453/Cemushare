@@ -2,7 +2,7 @@
 
 Share **many emulators with many people at once.** Each console is a headless
 Chromium running one emulator; its canvas + game audio are WebCodecs-encoded and
-streamed to every connected viewer. Viewers never run the emulator — they get
+streamed to every connected viewer. Viewers never run the emulator - they get
 pixels, and they press buttons into a shared input pile that feeds the host.
 
 ```
@@ -18,17 +18,17 @@ SQLite database. Viewers then discover it in the grid and connect via
 
 ## Stack
 
-- **server.js** — the relay (`ws`), auth (username/password via scrypt), signed
+- **server.js** - the relay (`ws`), auth (username/password via scrypt), signed
   viewer tokens, and SQLite (`better-sqlite3`) for users, sessions, and the
   console registry. Per-console: viewer fan-out, key/mouse merge (anarchy or
   majority democracy), keyframe cache, watchdog, chat, and a live roster.
-- **host/** — `host.js` (shared headless-Chromium runtime: viewport pinning,
+- **host/** - `host.js` (shared headless-Chromium runtime: viewport pinning,
   render shrink, audio capture, WebCodecs encode, input replay) and
   `serve-host.js` (loopback static server per console so the container's own
   Chromium can load the game, and nobody else can).
-- **public/** — the viewer web app (login/register, console grid, stream viewer
+- **public/** - the viewer web app (login/register, console grid, stream viewer
   with WebCodecs decode, on-screen + keyboard controls, chat, player list).
-- **consoles/** — each named folder is a console: `index.html` (loads
+- **consoles/** - each named folder is a console: `index.html` (loads
   `/ _shared/host.js` then the emulator bundle) plus `bin/` for the game
   binaries. `demo/` is a self-contained canvas console that tests the whole
   pipeline without a real ROM.
@@ -45,7 +45,7 @@ Open http://localhost:8090, register, and log in.
 
 ### Add a console from this machine (standalone host launcher)
 
-The relay alone doesn't run any games — each console is a headless Chromium.
+The relay alone doesn't run any games - each console is a headless Chromium.
 Run `npm run host-console` on **any machine that has Chrome/Edge** to stream a
 console in from there (you can even point it at a server on another computer):
 
@@ -68,21 +68,10 @@ Set `CHROME_BIN` to a specific Chrome/Edge path if the auto-detector misses it.
 > headless host's software-GL emulator is heavily throttled/starved whenever any
 > other GPU-heavy Chromium window is foregrounded (the viewer, Discord, etc.),
 > causing game + audio stutter. It's a Windows-specific occlusion/contention
-> quirk. Use Linux/Docker for reliable hosting; the viewer works fine anywhere.
+> quirk. Use Linux for reliable hosting; the viewer works fine anywhere.
 
 For the server to accept remote hosts it must be reachable over the network
 (it already binds `0.0.0.0`) and you must share `EMULATOR_HOST_TOKEN`.
-
-## Docker
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-`docker compose` boots the relay and one Chromium host per key in
-`EMULATOR_CONSOLE_KEYS` (default `demo`). Chromium profile dirs under
-`/data/profile/<key>` are volume-mounted so emulator saves persist.
 
 ## Adding a console
 
@@ -91,8 +80,10 @@ docker compose up --build
    - include `<canvas … data-host-canvas="1">` (the one to stream),
    - `<script src="/_shared/host.js"></script>` **before** the emulator bundle,
    - call `window.__hostStart()` when the game runtime is ready.
-3. Set `EMULATOR_CONSOLE_KEYS=<key>` (and optionally
-   `EMULATOR_META_<KEY>` = `Name|img.png|Category|Description`) and boot.
+3. Stream it in with `npm run host-console` (see above): the host page's
+   `register` frame tells the relay the console's name, image, category, and
+   description, so nothing needs to be hardcoded or pre-registered on the
+   server.
 
 Drop a real emulator bundle (as an Emscripten/SDL build like `sm64.js`/`sm64.wasm`)
 into `consoles/<key>/bin/` and reference it from `<key>/index.html`.
