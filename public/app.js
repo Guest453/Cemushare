@@ -184,6 +184,7 @@ async function autoDiscordAuth() {
         if (res.ok && data.token) {
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('auth.via', 'discord');
             showApp();
         } else {
             showPrompt(data.message || 'Discord sign-in failed (' + res.status + ')', 'error');
@@ -373,6 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (data.token) {
                         localStorage.setItem('token', data.token);
                         localStorage.setItem('user', JSON.stringify(data.user));
+                        localStorage.setItem('auth.via', 'normal');
                         showApp();
                         errorDiv.classList.add('hidden');
                     } else {
@@ -489,6 +491,7 @@ function getCurrentUsername() {
 function logout() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('auth.via');
     stopStream();
     currentConsoleName = null;
     document.getElementById('consoleViewerPage')?.classList.add('hidden');
@@ -543,10 +546,16 @@ function showTutorial(id) {
     document.getElementById('tutorialModal').classList.remove('hidden');
 }
 
+function isDiscordAuthed() {
+    try { return localStorage.getItem('auth.via') === 'discord'; } catch { return false; }
+}
+
 function maybeShowHomeTutorial() {
+    if (isDiscordAuthed()) return;
     if (!tutorialAlreadySeen('home')) showTutorial('home');
 }
 function maybeShowConsoleTutorial() {
+    if (isDiscordAuthed()) return;
     if (!tutorialAlreadySeen('console')) showTutorial('console');
 }
 
@@ -577,6 +586,15 @@ function tutorialClose() {
     document.getElementById('tutorialModal').classList.add('hidden');
     activeTutorial = null;
 }
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const modal = document.getElementById('tutorialModal');
+    if (modal && !modal.classList.contains('hidden')) {
+        e.preventDefault();
+        tutorialClose();
+    }
+});
 
 // stuff
 let currentConsoleName = null
