@@ -413,7 +413,7 @@ function shortLog(text, max = 300) {
 
 function httpsJSON(method, hostname, pathname, headers, body) {
     return new Promise((resolve, reject) => {
-        const req = https.request({ method, hostname, pathname, headers }, (res) => {
+        const req = https.request({ method, hostname, path: pathname, headers }, (res) => {
             let raw = '';
             res.on('data', (c) => { raw += c; });
             res.on('end', () => {
