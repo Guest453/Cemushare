@@ -63,6 +63,17 @@ const JWT_SECRET   = process.env.EMULATOR_JWT_SECRET || 'dev-secret-change-me';
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 const DISCORD_REDIRECT_URI  = (process.env.DISCORD_REDIRECT_URI || 'https://emushare.alkonsafe.dpdns.org/').trim();
+// Some networks resolve/reroute `discord.com` to the marketing edge instead of the API, which
+// serves the landing page even for /api/oauth2/token. Pin a known API edge IP if that happens.
+const DISCORD_API_IP        = (process.env.DISCORD_API_IP || '').trim();
+
+// Force a specific resolved IP for a host (bypasses bad DNS) while keeping Host/SNI as-is.
+function pinnedLookup(ip) {
+    return (hostname, opts, cb) => {
+        if (opts && opts.all) cb(null, [{ address: ip, family: 4 }]);
+        else cb(null, ip, 4);
+    };
+}
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 const LOG_INFO = process.env.EMULATOR_LOG || 'info'; // 'verbose' | 'info' | 'warn' | 'error'
@@ -411,9 +422,11 @@ function shortLog(text, max = 300) {
     return String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-function httpsJSON(method, hostname, pathname, headers, body) {
+function httpsJSON(method, hostname, pathname, headers, body, ip) {
     return new Promise((resolve, reject) => {
-        const req = https.request({ method, hostname, pathname, headers }, (res) => {
+        const opts = { method, hostname, pathname, headers, servername: hostname };
+        if (ip) opts.lookup = pinnedLookup(ip);
+        const req = https.request(opts, (res) => {
             let raw = '';
             res.on('data', (c) => { raw += c; });
             res.on('end', () => {
@@ -469,7 +482,7 @@ async function handleDiscordAuth(req, res) {
             grant_type: 'authorization_code',
             code,
             redirect_uri: redirectUri,
-        }).toString());
+        }).toString(), DISCORD_API_IP);
     } catch (e) {
         warn(`discord: token exchange failed: ${e.message}`);
         return json(res, 502, { message: `discord token exchange failed: ${e.message}` });
@@ -485,7 +498,7 @@ async function handleDiscordAuth(req, res) {
     let me;
     try {
         me = await httpsJSON('GET', 'discord.com', '/api/users/@me',
-            { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' });
+            { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }, DISCORD_API_IP);
     } catch (e) {
         warn(`discord: identify failed: ${e.message}`);
         return json(res, 502, { message: 'discord identify failed' });
